@@ -1,51 +1,53 @@
 import * as Y from 'yjs';
-import { PrismaClient } from '@prisma/client';
+import { ProjectFile } from '../models';
 
-const prisma = new PrismaClient();
+class DocumentSyncManager {
+    private documents: Map<string, Y.Doc> = new Map();
+    private saveTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
-class DocumentSync {
-    private docs: Map<string, Y.Doc> = new Map();
+    getDocumentKey(projectId: string, filePath: string): string {
+        return `${projectId}:${filePath}`;
+    }
 
     async getOrCreateDocument(projectId: string, filePath: string): Promise<Y.Doc> {
-        const key = `${projectId}:${filePath}`;
+        const key = this.getDocumentKey(projectId, filePath);
 
-        if (this.docs.has(key)) {
-            return this.docs.get(key)!;
+        if (this.documents.has(key)) {
+            return this.documents.get(key)!;
         }
 
         const ydoc = new Y.Doc();
-        const ytext = ydoc.getText('content');
 
-        // Load previous state from database
+        // Load from database if exists
         try {
-            const file = await prisma.projectFile.findUnique({
-                where: {
-                    projectId_path: { projectId, path: filePath }
-                }
-            });
+            const file = await ProjectFile.findOne({ projectId, path: filePath });
 
-            if (file && file.content) {
+            if (file && file.yjsState) {
+                Y.applyUpdate(ydoc, file.yjsState);
+            } else if (file && file.content) {
+                // Initialize with content
+                const ytext = ydoc.getText('content');
                 ytext.insert(0, file.content);
             }
         } catch (error) {
-            console.error('Error loading file from database:', error);
+            console.error('Error loading document:', error);
         }
 
-        // Set up update listener for persistence
-        ydoc.on('update', (update: Uint8Array) => {
-            this.schedulePersis(projectId, filePath);
+        this.documents.set(key, ydoc);
+
+        // Set up auto-save on updates
+        ydoc.on('update', () => {
+            this.debouncedSave(projectId, filePath);
         });
 
-        this.docs.set(key, ydoc);
         return ydoc;
     }
 
     applyUpdate(projectId: string, filePath: string, update: Uint8Array): boolean {
-        const key = `${projectId}:${filePath}`;
-        const ydoc = this.docs.get(key);
+        const key = this.getDocumentKey(projectId, filePath);
+        const ydoc = this.documents.get(key);
 
         if (!ydoc) {
-            console.error(`Document not found: ${key}`);
             return false;
         }
 
@@ -53,116 +55,128 @@ class DocumentSync {
             Y.applyUpdate(ydoc, update);
             return true;
         } catch (error) {
-            console.error('Failed to apply update:', error);
+            console.error('Error applying update:', error);
             return false;
         }
     }
 
     getState(projectId: string, filePath: string): Uint8Array | null {
-        const key = `${projectId}:${filePath}`;
-        const ydoc = this.docs.get(key);
+        const key = this.getDocumentKey(projectId, filePath);
+        const ydoc = this.documents.get(key);
 
-        if (!ydoc) return null;
+        if (!ydoc) {
+            return null;
+        }
 
         return Y.encodeStateAsUpdate(ydoc);
     }
 
     getText(projectId: string, filePath: string): string {
-        const key = `${projectId}:${filePath}`;
-        const ydoc = this.docs.get(key);
+        const key = this.getDocumentKey(projectId, filePath);
+        const ydoc = this.documents.get(key);
 
-        if (!ydoc) return '';
-
-        return ydoc.getText('content').toString();
-    }
-
-    // Debounced persistence to avoid too many DB writes
-    private persistTimers: Map<string, NodeJS.Timeout> = new Map();
-
-    private schedulePersis(projectId: string, filePath: string) {
-        const key = `${projectId}:${filePath}`;
-
-        // Clear existing timer
-        if (this.persistTimers.has(key)) {
-            clearTimeout(this.persistTimers.get(key)!);
+        if (!ydoc) {
+            return '';
         }
 
-        // Schedule new persistence after 2 seconds of inactivity
-        const timer = setTimeout(() => {
-            this.persistToDatabase(projectId, filePath);
-            this.persistTimers.delete(key);
-        }, 2000);
-
-        this.persistTimers.set(key, timer);
+        const ytext = ydoc.getText('content');
+        return ytext.toString();
     }
 
-    async persistToDatabase(projectId: string, filePath: string) {
+    private debouncedSave(projectId: string, filePath: string) {
+        const key = this.getDocumentKey(projectId, filePath);
+
+        // Clear existing timeout
+        if (this.saveTimeouts.has(key)) {
+            clearTimeout(this.saveTimeouts.get(key)!);
+        }
+
+        // Set new timeout for  saving
+        const timeout = setTimeout(async () => {
+            await this.saveToDatabase(projectId, filePath);
+            this.saveTimeouts.delete(key);
+        }, 2000); // Save after 2 seconds of inactivity
+
+        this.saveTimeouts.set(key, timeout);
+    }
+
+    private async saveToDatabase(projectId: string, filePath: string) {
+        const key = this.getDocumentKey(projectId, filePath);
+        const ydoc = this.documents.get(key);
+
+        if (!ydoc) {
+            return;
+        }
+
         try {
             const content = this.getText(projectId, filePath);
+            const yjsState = Y.encodeStateAsUpdate(ydoc);
+            const language = this.detectLanguage(filePath);
 
-            await prisma.projectFile.upsert({
-                where: { projectId_path: { projectId, path: filePath } },
-                create: {
-                    projectId,
-                    path: filePath,
+            await ProjectFile.findOneAndUpdate(
+                { projectId, path: filePath },
+                {
                     content,
-                    language: this.detectLanguage(filePath),
+                    yjsState: Buffer.from(yjsState),
+                    language,
                 },
-                update: {
-                    content,
-                    updatedAt: new Date(),
-                }
-            });
+                { upsert: true, new: true }
+            );
 
-            console.log(`Persisted file: ${projectId}:${filePath}`);
+            console.log(`Saved document: ${filePath}`);
         } catch (error) {
-            console.error('Error persisting to database:', error);
+            console.error('Error saving document:', error);
         }
     }
 
     private detectLanguage(filePath: string): string {
         const ext = filePath.split('.').pop()?.toLowerCase();
-        const languageMap: Record<string, string> = {
+        const langMap: Record<string, string> = {
             'js': 'javascript',
             'jsx': 'javascript',
             'ts': 'typescript',
             'tsx': 'typescript',
             'py': 'python',
             'java': 'java',
-            'go': 'go',
-            'rs': 'rust',
             'cpp': 'cpp',
             'c': 'c',
-            'css': 'css',
+            'cs': 'csharp',
+            'go': 'go',
+            'rs': 'rust',
+            'rb': 'ruby',
+            'php': 'php',
             'html': 'html',
+            'css': 'css',
             'json': 'json',
             'md': 'markdown',
+            'yaml': 'yaml',
+            'yml': 'yaml',
+            'xml': 'xml',
+            'sh': 'shell',
         };
-        return languageMap[ext || ''] || 'plaintext';
+
+        return langMap[ext || ''] || 'plaintext';
     }
 
     async closeDocument(projectId: string, filePath: string) {
-        const key = `${projectId}:${filePath}`;
+        const key = this.getDocumentKey(projectId, filePath);
 
-        // Persist before closing
-        await this.persistToDatabase(projectId, filePath);
-
-        const ydoc = this.docs.get(key);
-        if (ydoc) {
-            ydoc.destroy();
-            this.docs.delete(key);
+        // Clear save timeout
+        if (this.saveTimeouts.has(key)) {
+            clearTimeout(this.saveTimeouts.get(key)!);
+            this.saveTimeouts.delete(key);
         }
 
-        // Clear any pending persist timers
-        if (this.persistTimers.has(key)) {
-            clearTimeout(this.persistTimers.get(key)!);
-            this.persistTimers.delete(key);
-        }
+        // Final save
+        await this.saveToDatabase(projectId, filePath);
+
+        // Remove from memory
+        this.documents.delete(key);
     }
 
     getActiveDocuments(): string[] {
-        return Array.from(this.docs.keys());
+        return Array.from(this.documents.keys());
     }
 }
 
-export const documentSync = new DocumentSync();
+export const documentSync = new DocumentSyncManager();

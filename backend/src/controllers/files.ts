@@ -1,36 +1,35 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Project, ProjectCollaborator, ProjectFile } from '../models';
 import { lockManager } from '../services/locks';
-import { documentSync } from '../services/sync';
-
-const prisma = new PrismaClient();
 
 export async function getFile(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { projectId, path } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { projectId, path } = req.params;
+        const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
 
-        const file = await prisma.projectFile.findUnique({
-            where: {
-                projectId_path: { projectId: projectId, path: decodeURIComponent(path) }
-            }
-        });
+        if (!hasAccess) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const file = await ProjectFile.findOne({ projectId, path: req.params.path });
 
         if (!file) {
             return res.status(404).json({ error: 'File not found' });
         }
 
-        // Get lock status
-        const lock = await lockManager.getLock(projectId, file.path);
-
         res.json({
-            ...file,
-            locked: !!lock,
-            lockHolder: lock ? { id: lock.holder, name: lock.holderName } : null,
-            lockExpires: lock?.expiresAt,
+            id: file._id,
+            path: file.path,
+            content: file.content,
+            language: file.language,
+            createdAt: file.createdAt,
+            updatedAt: file.updatedAt,
         });
     } catch (error) {
         console.error('Get file error:', error);
@@ -40,31 +39,41 @@ export async function getFile(req: Request, res: Response) {
 
 export async function createFile(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
-        }
-
         const { projectId } = req.params;
-        const { path, content = '', language } = req.body;
+        const { path, content, language } = req.body;
+        const userId = (req as any).user?.userId;
 
-        if (!path) {
-            return res.status(400).json({ error: 'File path is required' });
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const file = await prisma.projectFile.create({
-            data: {
-                projectId,
-                path,
-                content,
-                language,
-            }
+        const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
+
+        if (!hasAccess || hasAccess.role === 'viewer') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const existing = await ProjectFile.findOne({ projectId, path });
+
+        if (existing) {
+            return res.status(400).json({ error: 'File already exists' });
+        }
+
+        const file = await ProjectFile.create({
+            projectId,
+            path,
+            content: content || '',
+            language: language || 'plaintext',
         });
 
-        res.status(201).json(file);
-    } catch (error: any) {
-        if (error.code === 'P2002') {
-            return res.status(409).json({ error: 'File already exists' });
-        }
+        res.status(201).json({
+            id: file._id,
+            path: file.path,
+            content: file.content,
+            language: file.language,
+            createdAt: file.createdAt,
+        });
+    } catch (error) {
         console.error('Create file error:', error);
         res.status(500).json({ error: 'Failed to create file' });
     }
@@ -72,34 +81,45 @@ export async function createFile(req: Request, res: Response) {
 
 export async function updateFile(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
-        }
-
         const { projectId, path } = req.params;
         const { content } = req.body;
-        const decodedPath = decodeURIComponent(path);
+        const userId = (req as any).user?.userId;
 
-        // Check if file is locked by another user
-        const lock = await lockManager.getLock(projectId, decodedPath);
-        if (lock && lock.holder !== req.user.userId) {
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
+
+        if (!hasAccess || hasAccess.role === 'viewer') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Check if file is locked by someone else
+        const lock = await lockManager.getLock(projectId, req.params.path);
+        if (lock && lock.holder !== userId) {
             return res.status(423).json({
                 error: 'File is locked by another user',
-                lockHolder: lock.holderName,
+                lockedBy: lock.holderName,
             });
         }
 
-        const file = await prisma.projectFile.update({
-            where: {
-                projectId_path: { projectId, path: decodedPath }
-            },
-            data: {
-                content,
-                updatedAt: new Date(),
-            }
-        });
+        const file = await ProjectFile.findOneAndUpdate(
+            { projectId, path: req.params.path },
+            { content },
+            { new: true }
+        );
 
-        res.json(file);
+        if (!file) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
+        res.json({
+            id: file._id,
+            path: file.path,
+            content: file.content,
+            updatedAt: file.updatedAt,
+        });
     } catch (error) {
         console.error('Update file error:', error);
         res.status(500).json({ error: 'Failed to update file' });
@@ -108,21 +128,20 @@ export async function updateFile(req: Request, res: Response) {
 
 export async function deleteFile(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { projectId, path } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { projectId, path } = req.params;
-        const decodedPath = decodeURIComponent(path);
+        const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
 
-        // Release lock if held
-        await lockManager.releaseLock(projectId, decodedPath, req.user.userId);
+        if (!hasAccess || hasAccess.role === 'viewer') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
 
-        await prisma.projectFile.delete({
-            where: {
-                projectId_path: { projectId, path: decodedPath }
-            }
-        });
+        await ProjectFile.deleteOne({ projectId, path: req.params.path });
 
         res.json({ message: 'File deleted successfully' });
     } catch (error) {
@@ -133,45 +152,31 @@ export async function deleteFile(req: Request, res: Response) {
 
 export async function acquireLock(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
-        }
-
         const { projectId, path } = req.params;
-        const decodedPath = decodeURIComponent(path);
+        const userId = (req as any).user?.userId;
+        const userName = (req as any).user?.email || 'User';
 
-        // Get user info
-        const user = await prisma.user.findUnique({
-            where: { id: req.user.userId }
-        });
-
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const lock = await lockManager.acquireLock(projectId, decodedPath, req.user.userId, user.name);
+        const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
+
+        if (!hasAccess || hasAccess.role === 'viewer') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const lock = await lockManager.acquireLock(projectId, req.params.path, userId, userName);
 
         if (!lock) {
-            const existingLock = await lockManager.getLock(projectId, decodedPath);
-            return res.status(409).json({
+            const existingLock = await lockManager.getLock(projectId, req.params.path);
+            return res.status(423).json({
                 error: 'File is already locked',
-                holder: existingLock ? {
-                    id: existingLock.holder,
-                    name: existingLock.holderName,
-                } : null,
-                expiresAt: existingLock?.expiresAt,
+                lock: existingLock,
             });
         }
 
-        res.json({
-            locked: true,
-            holder: {
-                id: lock.holder,
-                name: lock.holderName,
-            },
-            acquiredAt: lock.acquiredAt,
-            expiresAt: lock.expiresAt,
-        });
+        res.json(lock);
     } catch (error) {
         console.error('Acquire lock error:', error);
         res.status(500).json({ error: 'Failed to acquire lock' });
@@ -180,17 +185,17 @@ export async function acquireLock(req: Request, res: Response) {
 
 export async function releaseLock(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { projectId, path } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { projectId, path } = req.params;
-        const decodedPath = decodeURIComponent(path);
-
-        const released = await lockManager.releaseLock(projectId, decodedPath, req.user.userId);
+        const released = await lockManager.releaseLock(projectId, req.params.path, userId);
 
         if (!released) {
-            return res.status(400).json({ error: 'You do not hold the lock on this file' });
+            return res.status(400).json({ error: 'Lock not held by this user' });
         }
 
         res.json({ message: 'Lock released successfully' });
@@ -202,32 +207,18 @@ export async function releaseLock(req: Request, res: Response) {
 
 export async function getLockStatus(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
-        }
-
         const { projectId, path } = req.params;
-        const decodedPath = decodeURIComponent(path);
+        const userId = (req as any).user?.userId;
 
-        const lock = await lockManager.getLock(projectId, decodedPath);
-
-        if (!lock) {
-            return res.json({
-                locked: false,
-                holder: null,
-                expiresAt: null,
-            });
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
+
+        const lock = await lockManager.getLock(projectId, req.params.path);
 
         res.json({
-            locked: true,
-            holder: {
-                id: lock.holder,
-                name: lock.holderName,
-            },
-            acquiredAt: lock.acquiredAt,
-            expiresAt: lock.expiresAt,
-            isOwnedByCurrentUser: lock.holder === req.user.userId,
+            locked: !!lock,
+            lock: lock || null,
         });
     } catch (error) {
         console.error('Get lock status error:', error);
@@ -237,25 +228,20 @@ export async function getLockStatus(req: Request, res: Response) {
 
 export async function refreshLock(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { projectId, path } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { projectId, path } = req.params;
-        const decodedPath = decodeURIComponent(path);
-
-        const refreshed = await lockManager.refreshLock(projectId, decodedPath, req.user.userId);
+        const refreshed = await lockManager.refreshLock(projectId, req.params.path, userId);
 
         if (!refreshed) {
-            return res.status(400).json({ error: 'Failed to refresh lock' });
+            return res.status(400).json({ error: 'Lock not held by this user' });
         }
 
-        const lock = await lockManager.getLock(projectId, decodedPath);
-
-        res.json({
-            message: 'Lock refreshed successfully',
-            expiresAt: lock?.expiresAt,
-        });
+        res.json({ message: 'Lock refreshed successfully' });
     } catch (error) {
         console.error('Refresh lock error:', error);
         res.status(500).json({ error: 'Failed to refresh lock' });

@@ -1,67 +1,70 @@
 import { Request, Response } from 'express';
-import { getUserById, generateToken } from '../services/auth';
-import { PrismaClient } from '@prisma/client';
+import { generateToken, verifyToken } from '../services/auth';
+import { User } from '../models';
 
-const prisma = new PrismaClient();
-
-// Mock GitHub OAuth for development (replace with real OAuth in production)
+// Mock GitHub OAuth for development
 export async function githubCallback(req: Request, res: Response) {
     try {
         const { code } = req.body;
 
         if (!code) {
-            return res.status(400).json({ error: 'Missing authorization code' });
+            return res.status(400).json({ error: 'Authorization code required' });
         }
 
-        // In production, exchange code for GitHub access token
-        // For now, create a mock user for development
-        const mockGithubId = `github_${code}`;
+        // In development, create/find user based on code as identifier
+        const githubId = `github_${code}`;
+        const email = `${code}@example.com`;
+        const name = code.charAt(0).toUpperCase() + code.slice(1);
 
-        let user = await prisma.user.findUnique({
-            where: { githubId: mockGithubId }
-        });
+        let user = await User.findOne({ githubId });
 
         if (!user) {
-            user = await prisma.user.create({
-                data: {
-                    githubId: mockGithubId,
-                    email: `user_${code}@codecollab.dev`,
-                    name: `User ${code}`,
-                    avatar: `https://avatars.githubusercontent.com/u/${Math.floor(Math.random() * 100000)}`,
-                }
+            user = await User.create({
+                email,
+                name,
+                githubId,
+                avatar: `https://avatars.githubusercontent.com/u/${Math.floor(Math.random() * 1000)}?v=4`,
             });
         }
 
-        const token = generateToken(user.id, user.email);
+        const token = generateToken(user._id.toString(), user.email);
 
         res.json({
             token,
             user: {
-                id: user.id,
+                id: user._id,
                 email: user.email,
                 name: user.name,
                 avatar: user.avatar,
-            }
+            },
         });
     } catch (error) {
-        console.error('GitHub auth error:', error);
+        console.error('Auth error:', error);
         res.status(500).json({ error: 'Authentication failed' });
     }
 }
 
 export async function getCurrentUser(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const user = await getUserById(req.user.userId);
+        const user = await User.findById(userId).select('-__v');
 
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        res.json(user);
+        res.json({
+            id: user._id,
+            email: user.email,
+            name: user.name,
+            avatar: user.avatar,
+            createdAt: user.createdAt,
+        });
     } catch (error) {
         console.error('Get user error:', error);
         res.status(500).json({ error: 'Failed to get user' });
@@ -69,6 +72,5 @@ export async function getCurrentUser(req: Request, res: Response) {
 }
 
 export async function logout(req: Request, res: Response) {
-    // With JWT, logout is handled client-side by removing the token
     res.json({ message: 'Logged out successfully' });
 }

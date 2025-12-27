@@ -4,11 +4,8 @@ import { documentSync } from './services/sync';
 import { lockManager } from './services/locks';
 import { presenceManager } from './services/presence';
 import { terminalManager } from './services/terminal';
-import { PrismaClient } from '@prisma/client';
+import { User, ProjectCollaborator } from './models';
 import logger from './config/logger';
-import * as Y from 'yjs';
-
-const prisma = new PrismaClient();
 
 declare module 'socket.io' {
     interface Socket {
@@ -36,9 +33,7 @@ export function setupSocketEvents(io: Server) {
         }
 
         // Load user info
-        const user = await prisma.user.findUnique({
-            where: { id: payload.userId }
-        });
+        const user = await User.findById(payload.userId).select('name');
 
         if (!user) {
             return next(new Error('User not found'));
@@ -58,17 +53,12 @@ export function setupSocketEvents(io: Server) {
                 const { projectId } = data;
 
                 // Verify user has access to project
-                const project = await prisma.project.findFirst({
-                    where: {
-                        id: projectId,
-                        OR: [
-                            { ownerId: socket.data.userId },
-                            { collaborators: { some: { userId: socket.data.userId } } }
-                        ]
-                    }
+                const hasAccess = await ProjectCollaborator.findOne({
+                    projectId,
+                    userId: socket.data.userId
                 });
 
-                if (!project) {
+                if (!hasAccess) {
                     socket.emit('error', { message: 'Access denied to project' });
                     return;
                 }
@@ -226,9 +216,7 @@ export function setupSocketEvents(io: Server) {
                 const projectId = socket.data.projectId;
                 if (!projectId) return;
 
-                const user = await prisma.user.findUnique({
-                    where: { id: socket.data.userId }
-                });
+                const user = await User.findById(socket.data.userId).select('avatar');
 
                 const presence = await presenceManager.updatePresence(projectId, {
                     userId: socket.data.userId,

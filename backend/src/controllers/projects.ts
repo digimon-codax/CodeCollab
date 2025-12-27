@@ -1,71 +1,37 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { Project, ProjectCollaborator, ProjectFile, User } from '../models';
+import mongoose from 'mongoose';
 
 export async function createProject(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { name, description, template, runtime } = req.body;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { name, description, template = 'nodejs-express', runtime = 'node:20' } = req.body;
+        const project = await Project.create({
+            name,
+            description: description || '',
+            template: template || 'blank',
+            runtime: runtime || 'node:20',
+            ownerId: userId,
+        });
 
-        if (!name) {
-            return res.status(400).json({ error: 'Project name is required' });
-        }
+        // Add owner as collaborator
+        await ProjectCollaborator.create({
+            projectId: project._id,
+            userId,
+            role: 'owner',
+        });
 
-        const project = await prisma.project.create({
-            data: {
-                name,
-                description,
-                template,
-                runtime,
-                ownerId: req.user.userId,
-                collaborators: {
-                    create: {
-                        userId: req.user.userId,
-                        role: 'owner',
-                    }
-                },
-                files: {
-                    create: [
-                        {
-                            path: 'README.md',
-                            content: `# ${name}\n\n${description || 'A new CodeCollab project'}`,
-                            language: 'markdown',
-                        },
-                        {
-                            path: 'index.js',
-                            content: '// Start coding here!\nconsole.log("Hello, CodeCollab!");',
-                            language: 'javascript',
-                        }
-                    ]
-                }
-            },
-            include: {
-                owner: {
-                    select: {
-                        id: true,
-                        name: true,
-                        email: true,
-                        avatar: true,
-                    }
-                },
-                collaborators: {
-                    include: {
-                        user: {
-                            select: {
-                                id: true,
-                                name: true,
-                                email: true,
-                                avatar: true,
-                            }
-                        }
-                    }
-                },
-                files: true,
-            }
+        // Create initial file
+        await ProjectFile.create({
+            projectId: project._id,
+            path: 'README.md',
+            content: `# ${name}\n\n${description || 'A new CodeCollab project'}`,
+            language: 'markdown',
         });
 
         res.status(201).json(project);
@@ -75,158 +41,140 @@ export async function createProject(req: Request, res: Response) {
     }
 }
 
-export async function getProject(req: Request, res: Response) {
-    try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
-        }
-
-        const { id } = req.params;
-
-        const project = await prisma.project.findUnique({
-            where: { id },
-            include: {
-                owner: {
-                    select: {
-                        id: true,
-                        name: true,
-                        email: true,
-                        avatar: true,
-                    }
-                },
-                collaborators: {
-                    include: {
-                        user: {
-                            select: {
-                                id: true,
-                                name: true,
-                                email: true,
-                                avatar: true,
-                            }
-                        }
-                    }
-                },
-                files: {
-                    select: {
-                        id: true,
-                        path: true,
-                        language: true,
-                        lockedBy: true,
-                        lockedAt: true,
-                        updatedAt: true,
-                    }
-                }
-            }
-        });
-
-        if (!project) {
-            return res.status(404).json({ error: 'Project not found' });
-        }
-
-        // Check if user has access
-        const hasAccess = project.ownerId === req.user.userId ||
-            project.collaborators.some(c => c.userId === req.user.userId);
-
-        if (!hasAccess) {
-            return res.status(403).json({ error: 'Access denied' });
-        }
-
-        res.json(project);
-    } catch (error) {
-        console.error('Get project error:', error);
-        res.status(500).json({ error: 'Failed to get project' });
-    }
-}
-
 export async function listProjects(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const projects = await prisma.project.findMany({
-            where: {
-                OR: [
-                    { ownerId: req.user.userId },
-                    { collaborators: { some: { userId: req.user.userId } } }
-                ]
-            },
-            include: {
-                owner: {
-                    select: {
-                        id: true,
-                        name: true,
-                        avatar: true,
-                    }
-                },
-                collaborators: {
-                    select: {
-                        role: true,
-                        user: {
-                            select: {
-                                id: true,
-                                name: true,
-                                avatar: true,
-                            }
-                        }
-                    }
-                },
-                _count: {
-                    select: {
-                        files: true,
-                    }
-                }
-            },
-            orderBy: {
-                updatedAt: 'desc',
-            }
-        });
+        // Find all collaborations for this user
+        const collaborations = await ProjectCollaborator.find({ userId });
+        const projectIds = collaborations.map(c => c.projectId);
 
-        res.json(projects);
+        const projects = await Project.find({
+            _id: { $in: projectIds }
+        }).populate('ownerId', 'name email avatar');
+
+        // Get file counts and collaborator counts
+        const projectsWithDetails = await Promise.all(
+            projects.map(async (project) => {
+                const fileCount = await ProjectFile.countDocuments({ projectId: project._id });
+                const collaborators = await ProjectCollaborator.find({ projectId: project._id })
+                    .populate('userId', 'name email avatar');
+
+                return {
+                    id: project._id,
+                    name: project.name,
+                    description: project.description,
+                    template: project.template,
+                    runtime: project.runtime,
+                    owner: project.ownerId,
+                    collaborators: collaborators.map(c => ({
+                        user: c.userId,
+                        role: c.role,
+                    })),
+                    _count: {
+                        files: fileCount,
+                    },
+                    createdAt: project.createdAt,
+                    updatedAt: project.updatedAt,
+                };
+            })
+        );
+
+        res.json(projectsWithDetails);
     } catch (error) {
         console.error('List projects error:', error);
         res.status(500).json({ error: 'Failed to list projects' });
     }
 }
 
-export async function updateProject(req: Request, res: Response) {
+export async function getProject(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { id } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { id } = req.params;
-        const { name, description } = req.body;
-
-        const project = await prisma.project.findUnique({
-            where: { id }
-        });
+        const project = await Project.findById(id).populate('ownerId', 'name email avatar');
 
         if (!project) {
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        if (project.ownerId !== req.user.userId) {
+        // Check if user has access
+        const hasAccess = await ProjectCollaborator.findOne({
+            projectId: project._id,
+            userId,
+        });
+
+        if (!hasAccess) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const files = await ProjectFile.find({ projectId: project._id }).select('-content -yjsState');
+        const collaborators = await ProjectCollaborator.find({ projectId: project._id })
+            .populate('userId', 'name email avatar');
+
+        res.json({
+            id: project._id,
+            name: project.name,
+            description: project.description,
+            template: project.template,
+            runtime: project.runtime,
+            owner: project.ownerId,
+            files: files.map(f => ({
+                id: f._id,
+                path: f.path,
+                language: f.language,
+                createdAt: f.createdAt,
+                updatedAt: f.updatedAt,
+            })),
+            collaborators: collaborators.map(c => ({
+                user: c.userId,
+                role: c.role,
+                addedAt: c.addedAt,
+            })),
+            createdAt: project.createdAt,
+            updatedAt: project.updatedAt,
+        });
+    } catch (error) {
+        console.error('Get project error:', error);
+        res.status(500).json({ error: 'Failed to get project' });
+    }
+}
+
+export async function updateProject(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const { name, description } = req.body;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const project = await Project.findById(id);
+
+        if (!project) {
+            return res.status(404).json({ error: 'Project not found' });
+        }
+
+        // Check if user is owner
+        if (project.ownerId.toString() !== userId) {
             return res.status(403).json({ error: 'Only owner can update project' });
         }
 
-        const updated = await prisma.project.update({
-            where: { id },
-            data: {
-                name: name || project.name,
-                description: description !== undefined ? description : project.description,
-            },
-            include: {
-                owner: true,
-                collaborators: {
-                    include: {
-                        user: true,
-                    }
-                }
-            }
-        });
+        if (name) project.name = name;
+        if (description !== undefined) project.description = description;
 
-        res.json(updated);
+        await project.save();
+
+        res.json(project);
     } catch (error) {
         console.error('Update project error:', error);
         res.status(500).json({ error: 'Failed to update project' });
@@ -235,27 +183,28 @@ export async function updateProject(req: Request, res: Response) {
 
 export async function deleteProject(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { id } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { id } = req.params;
-
-        const project = await prisma.project.findUnique({
-            where: { id }
-        });
+        const project = await Project.findById(id);
 
         if (!project) {
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        if (project.ownerId !== req.user.userId) {
+        // Check if user is owner
+        if (project.ownerId.toString() !== userId) {
             return res.status(403).json({ error: 'Only owner can delete project' });
         }
 
-        await prisma.project.delete({
-            where: { id }
-        });
+        // Delete all related data
+        await ProjectFile.deleteMany({ projectId: project._id });
+        await ProjectCollaborator.deleteMany({ projectId: project._id });
+        await Project.findByIdAndDelete(id);
 
         res.json({ message: 'Project deleted successfully' });
     } catch (error) {
@@ -266,56 +215,56 @@ export async function deleteProject(req: Request, res: Response) {
 
 export async function addCollaborator(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { id } = req.params;
+        const { email, role } = req.body;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { id } = req.params;
-        const { email, role = 'editor' } = req.body;
-
-        const project = await prisma.project.findUnique({
-            where: { id }
-        });
+        const project = await Project.findById(id);
 
         if (!project) {
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        if (project.ownerId !== req.user.userId) {
+        // Check if user is owner
+        if (project.ownerId.toString() !== userId) {
             return res.status(403).json({ error: 'Only owner can add collaborators' });
         }
 
-        const user = await prisma.user.findUnique({
-            where: { email }
-        });
+        const collaboratorUser = await User.findOne({ email });
 
-        if (!user) {
+        if (!collaboratorUser) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        const collaborator = await prisma.projectCollaborator.create({
-            data: {
-                projectId: id,
-                userId: user.id,
-                role,
-            },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        name: true,
-                        email: true,
-                        avatar: true,
-                    }
-                }
-            }
+        // Check if already a collaborator
+        const existing = await ProjectCollaborator.findOne({
+            projectId: project._id,
+            userId: collaboratorUser._id,
         });
 
-        res.status(201).json(collaborator);
-    } catch (error: any) {
-        if (error.code === 'P2002') {
-            return res.status(409).json({ error: 'User is already a collaborator' });
+        if (existing) {
+            return res.status(400).json({ error: 'User is already a collaborator' });
         }
+
+        const collaborator = await ProjectCollaborator.create({
+            projectId: project._id,
+            userId: collaboratorUser._id,
+            role: role || 'editor',
+        });
+
+        const populated = await ProjectCollaborator.findById(collaborator._id)
+            .populate('userId', 'name email avatar');
+
+        res.status(201).json({
+            user: populated?.userId,
+            role: populated?.role,
+            addedAt: populated?.addedAt,
+        });
+    } catch (error) {
         console.error('Add collaborator error:', error);
         res.status(500).json({ error: 'Failed to add collaborator' });
     }
@@ -323,31 +272,27 @@ export async function addCollaborator(req: Request, res: Response) {
 
 export async function removeCollaborator(req: Request, res: Response) {
     try {
-        if (!req.user) {
-            return res.status(401).json({ error: 'Not authenticated' });
+        const { id, userId: targetUserId } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { id, userId } = req.params;
-
-        const project = await prisma.project.findUnique({
-            where: { id }
-        });
+        const project = await Project.findById(id);
 
         if (!project) {
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        if (project.ownerId !== req.user.userId) {
+        // Check if user is owner
+        if (project.ownerId.toString() !== userId) {
             return res.status(403).json({ error: 'Only owner can remove collaborators' });
         }
 
-        await prisma.projectCollaborator.delete({
-            where: {
-                projectId_userId: {
-                    projectId: id,
-                    userId,
-                }
-            }
+        await ProjectCollaborator.deleteOne({
+            projectId: project._id,
+            userId: targetUserId,
         });
 
         res.json({ message: 'Collaborator removed successfully' });

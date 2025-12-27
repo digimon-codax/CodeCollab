@@ -11,6 +11,7 @@ import { setupSocketEvents } from './socket';
 import { authMiddleware, optionalAuth } from './middleware/auth';
 import { requestLogger } from './middleware/requestLogger';
 import logger from './config/logger';
+import { connectDatabase } from './models';
 import * as authController from './controllers/auth';
 import * as projectsController from './controllers/projects';
 import * as filesController from './controllers/files';
@@ -123,16 +124,24 @@ app.use((err: any, req: Request, res: Response, next: any) => {
 // Start server
 const PORT = config.port;
 
-httpServer.listen(PORT, () => {
-    logger.info('═══════════════════════════════════════════════');
-    logger.info('  CodeCollab Backend Server');
-    logger.info('═══════════════════════════════════════════════');
-    logger.info(`  🚀 Server running on: http://localhost:${PORT}`);
-    logger.info(`  🌍 Environment: ${config.nodeEnv}`);
-    logger.info(`  📡 Socket.IO ready for connections`);
-    logger.info(`  🔒 CORS origin: ${config.cors.origin}`);
-    logger.info('═══════════════════════════════════════════════');
-});
+// Connect to MongoDB first
+connectDatabase()
+    .then(() => {
+        httpServer.listen(PORT, () => {
+            logger.info('═══════════════════════════════════════════════');
+            logger.info('  CodeCollab Backend Server');
+            logger.info('═══════════════════════════════════════════════');
+            logger.info(`  🚀 Server running on: http://localhost:${PORT}`);
+            logger.info(`  🌍 Environment: ${config.nodeEnv}`);
+            logger.info(`  📡 Socket.IO ready for connections`);
+            logger.info(`  🔒 CORS origin: ${config.cors.origin}`);
+            logger.info('═══════════════════════════════════════════════');
+        });
+    })
+    .catch((error) => {
+        logger.error('Failed to start server:', error);
+        process.exit(1);
+    });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
