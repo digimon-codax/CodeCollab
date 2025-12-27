@@ -57,7 +57,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/src:/app/src
-    command: npm run dev
+    command: npm start
     networks:
       - codecollab
 
@@ -72,9 +72,10 @@ services:
     environment:
       VITE_API_URL: http://localhost:3000
       VITE_WS_URL: ws://localhost:3000
+      VITE_PROXY_TARGET: http://backend:3000
     volumes:
       - ./frontend/src:/app/src
-    command: npm run dev
+    command: npm run dev -- --host
     networks:
       - codecollab
     depends_on:

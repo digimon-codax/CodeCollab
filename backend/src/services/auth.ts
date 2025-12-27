@@ -10,8 +10,8 @@ export interface JWTPayload {
 export function generateToken(userId: string, email: string): string {
     return jwt.sign(
         { userId, email },
-        config.jwt.secret,
-        { expiresIn: config.jwt.expiresIn }
+        config.jwt.secret as string,
+        { expiresIn: config.jwt.expiresIn } as any
     );
 }
 

@@ -8,7 +8,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { config, validateConfig } from './config/env';
 import { setupSocketEvents } from './socket';
-import { authMiddleware, optionalAuth } from './middleware/auth';
+import { authMiddleware } from './middleware/auth';
 import { requestLogger } from './middleware/requestLogger';
 import logger from './config/logger';
 import { connectDatabase } from './models';
@@ -63,7 +63,7 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Health check
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
@@ -77,6 +77,8 @@ app.get('/health', (req: Request, res: Response) => {
 // Auth routes (public)
 app.post('/api/auth/github/callback', authController.githubCallback);
 app.post('/api/auth/logout', authController.logout);
+app.post('/api/auth/signup', authController.signup);
+app.post('/api/auth/login', authController.login);
 
 // Auth routes (protected)
 app.get('/api/auth/user', authMiddleware, authController.getCurrentUser);
@@ -91,6 +93,10 @@ app.delete('/api/projects/:id', authMiddleware, projectsController.deleteProject
 // Collaborator routes
 app.post('/api/projects/:id/collaborators', authMiddleware, projectsController.addCollaborator);
 app.delete('/api/projects/:id/collaborators/:userId', authMiddleware, projectsController.removeCollaborator);
+
+// Invite code routes
+app.post('/api/projects/join', authMiddleware, projectsController.joinProjectByCode);
+app.post('/api/projects/:id/invite-code/regenerate', authMiddleware, projectsController.regenerateInviteCode);
 
 // File routes
 app.get('/api/projects/:projectId/files/:path(*)', authMiddleware, filesController.getFile);
@@ -113,7 +119,7 @@ app.use((req: Request, res: Response) => {
 });
 
 // Error handler
-app.use((err: any, req: Request, res: Response, next: any) => {
+app.use((err: any, _req: Request, res: Response, _next: any) => {
     console.error('Error:', err);
     res.status(err.status || 500).json({
         error: err.message || 'Internal server error',

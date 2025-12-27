@@ -4,7 +4,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IUser extends Document {
     email: string;
     name: string;
-    githubId: string;
+    githubId?: string;
+    password?: string;
     avatar: string | null;
     createdAt: Date;
     updatedAt: Date;
@@ -13,7 +14,8 @@ export interface IUser extends Document {
 const UserSchema = new Schema<IUser>({
     email: { type: String, required: true, unique: true, index: true },
     name: { type: String, required: true },
-    githubId: { type: String, required: true, unique: true },
+    githubId: { type: String, unique: true, sparse: true },
+    password: { type: String, select: false },
     avatar: { type: String, default: null },
 }, {
     timestamps: true,
@@ -28,6 +30,7 @@ export interface IProject extends Document {
     template: string;
     runtime: string;
     ownerId: mongoose.Types.ObjectId;
+    inviteCode?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -38,6 +41,7 @@ const ProjectSchema = new Schema<IProject>({
     template: { type: String, default: 'blank' },
     runtime: { type: String, default: 'node:20' },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    inviteCode: { type: String, unique: true, sparse: true, index: true },
 }, {
     timestamps: true,
 });

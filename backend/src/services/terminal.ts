@@ -1,4 +1,3 @@
-import { spawn } from 'child_process';
 import * as pty from 'node-pty';
 import os from 'os';
 

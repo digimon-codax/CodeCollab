@@ -8,12 +8,10 @@ import { User, ProjectCollaborator } from './models';
 import logger from './config/logger';
 
 declare module 'socket.io' {
-    interface Socket {
-        data: {
-            userId: string;
-            userName: string;
-            projectId?: string;
-        };
+    interface SocketData {
+        userId: string;
+        userName: string;
+        projectId?: string;
     }
 }
 

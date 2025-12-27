@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Project, ProjectCollaborator, ProjectFile } from '../models';
+import { ProjectCollaborator, ProjectFile } from '../models';
 import { lockManager } from '../services/locks';
 
 export async function getFile(req: Request, res: Response) {
@@ -8,19 +8,22 @@ export async function getFile(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
 
         if (!hasAccess) {
-            return res.status(403).json({ error: 'Access denied' });
+            res.status(403).json({ error: 'Access denied' });
+            return;
         }
 
-        const file = await ProjectFile.findOne({ projectId, path: req.params.path });
+        const file = await ProjectFile.findOne({ projectId, path });
 
         if (!file) {
-            return res.status(404).json({ error: 'File not found' });
+            res.status(404).json({ error: 'File not found' });
+            return;
         }
 
         res.json({
@@ -44,19 +47,22 @@ export async function createFile(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
 
         if (!hasAccess || hasAccess.role === 'viewer') {
-            return res.status(403).json({ error: 'Access denied' });
+            res.status(403).json({ error: 'Access denied' });
+            return;
         }
 
         const existing = await ProjectFile.findOne({ projectId, path });
 
         if (existing) {
-            return res.status(400).json({ error: 'File already exists' });
+            res.status(400).json({ error: 'File already exists' });
+            return;
         }
 
         const file = await ProjectFile.create({
@@ -86,32 +92,36 @@ export async function updateFile(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
 
         if (!hasAccess || hasAccess.role === 'viewer') {
-            return res.status(403).json({ error: 'Access denied' });
+            res.status(403).json({ error: 'Access denied' });
+            return;
         }
 
         // Check if file is locked by someone else
-        const lock = await lockManager.getLock(projectId, req.params.path);
+        const lock = await lockManager.getLock(projectId, path);
         if (lock && lock.holder !== userId) {
-            return res.status(423).json({
+            res.status(423).json({
                 error: 'File is locked by another user',
                 lockedBy: lock.holderName,
             });
+            return;
         }
 
         const file = await ProjectFile.findOneAndUpdate(
-            { projectId, path: req.params.path },
+            { projectId, path },
             { content },
             { new: true }
         );
 
         if (!file) {
-            return res.status(404).json({ error: 'File not found' });
+            res.status(404).json({ error: 'File not found' });
+            return;
         }
 
         res.json({
@@ -132,16 +142,18 @@ export async function deleteFile(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
 
         if (!hasAccess || hasAccess.role === 'viewer') {
-            return res.status(403).json({ error: 'Access denied' });
+            res.status(403).json({ error: 'Access denied' });
+            return;
         }
 
-        await ProjectFile.deleteOne({ projectId, path: req.params.path });
+        await ProjectFile.deleteOne({ projectId, path });
 
         res.json({ message: 'File deleted successfully' });
     } catch (error) {
@@ -157,23 +169,26 @@ export async function acquireLock(req: Request, res: Response) {
         const userName = (req as any).user?.email || 'User';
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
 
         if (!hasAccess || hasAccess.role === 'viewer') {
-            return res.status(403).json({ error: 'Access denied' });
+            res.status(403).json({ error: 'Access denied' });
+            return;
         }
 
-        const lock = await lockManager.acquireLock(projectId, req.params.path, userId, userName);
+        const lock = await lockManager.acquireLock(projectId, path, userId, userName);
 
         if (!lock) {
-            const existingLock = await lockManager.getLock(projectId, req.params.path);
-            return res.status(423).json({
+            const existingLock = await lockManager.getLock(projectId, path);
+            res.status(423).json({
                 error: 'File is already locked',
                 lock: existingLock,
             });
+            return;
         }
 
         res.json(lock);
@@ -189,13 +204,15 @@ export async function releaseLock(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
-        const released = await lockManager.releaseLock(projectId, req.params.path, userId);
+        const released = await lockManager.releaseLock(projectId, path, userId);
 
         if (!released) {
-            return res.status(400).json({ error: 'Lock not held by this user' });
+            res.status(400).json({ error: 'Lock not held by this user' });
+            return;
         }
 
         res.json({ message: 'Lock released successfully' });
@@ -211,10 +228,11 @@ export async function getLockStatus(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
-        const lock = await lockManager.getLock(projectId, req.params.path);
+        const lock = await lockManager.getLock(projectId, path);
 
         res.json({
             locked: !!lock,
@@ -232,13 +250,15 @@ export async function refreshLock(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
-        const refreshed = await lockManager.refreshLock(projectId, req.params.path, userId);
+        const refreshed = await lockManager.refreshLock(projectId, path, userId);
 
         if (!refreshed) {
-            return res.status(400).json({ error: 'Lock not held by this user' });
+            res.status(400).json({ error: 'Lock not held by this user' });
+            return;
         }
 
         res.json({ message: 'Lock refreshed successfully' });

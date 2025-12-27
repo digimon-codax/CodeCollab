@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Project, ProjectCollaborator, ProjectFile, User } from '../models';
-import mongoose from 'mongoose';
+import { generateInviteCode } from '../utils/inviteCode';
+
 
 export async function createProject(req: Request, res: Response) {
     try {
@@ -8,7 +9,8 @@ export async function createProject(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const project = await Project.create({
@@ -17,6 +19,7 @@ export async function createProject(req: Request, res: Response) {
             template: template || 'blank',
             runtime: runtime || 'node:20',
             ownerId: userId,
+            inviteCode: generateInviteCode(),
         });
 
         // Add owner as collaborator
@@ -46,7 +49,8 @@ export async function listProjects(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         // Find all collaborations for this user
@@ -97,13 +101,15 @@ export async function getProject(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const project = await Project.findById(id).populate('ownerId', 'name email avatar');
 
         if (!project) {
-            return res.status(404).json({ error: 'Project not found' });
+            res.status(404).json({ error: 'Project not found' });
+            return;
         }
 
         // Check if user has access
@@ -113,7 +119,8 @@ export async function getProject(req: Request, res: Response) {
         });
 
         if (!hasAccess) {
-            return res.status(403).json({ error: 'Access denied' });
+            res.status(403).json({ error: 'Access denied' });
+            return;
         }
 
         const files = await ProjectFile.find({ projectId: project._id }).select('-content -yjsState');
@@ -155,18 +162,21 @@ export async function updateProject(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const project = await Project.findById(id);
 
         if (!project) {
-            return res.status(404).json({ error: 'Project not found' });
+            res.status(404).json({ error: 'Project not found' });
+            return;
         }
 
         // Check if user is owner
         if (project.ownerId.toString() !== userId) {
-            return res.status(403).json({ error: 'Only owner can update project' });
+            res.status(403).json({ error: 'Only owner can update project' });
+            return;
         }
 
         if (name) project.name = name;
@@ -187,18 +197,21 @@ export async function deleteProject(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const project = await Project.findById(id);
 
         if (!project) {
-            return res.status(404).json({ error: 'Project not found' });
+            res.status(404).json({ error: 'Project not found' });
+            return;
         }
 
         // Check if user is owner
         if (project.ownerId.toString() !== userId) {
-            return res.status(403).json({ error: 'Only owner can delete project' });
+            res.status(403).json({ error: 'Only owner can delete project' });
+            return;
         }
 
         // Delete all related data
@@ -220,24 +233,28 @@ export async function addCollaborator(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const project = await Project.findById(id);
 
         if (!project) {
-            return res.status(404).json({ error: 'Project not found' });
+            res.status(404).json({ error: 'Project not found' });
+            return;
         }
 
         // Check if user is owner
         if (project.ownerId.toString() !== userId) {
-            return res.status(403).json({ error: 'Only owner can add collaborators' });
+            res.status(403).json({ error: 'Only owner can add collaborators' });
+            return;
         }
 
         const collaboratorUser = await User.findOne({ email });
 
         if (!collaboratorUser) {
-            return res.status(404).json({ error: 'User not found' });
+            res.status(404).json({ error: 'User not found' });
+            return;
         }
 
         // Check if already a collaborator
@@ -247,7 +264,8 @@ export async function addCollaborator(req: Request, res: Response) {
         });
 
         if (existing) {
-            return res.status(400).json({ error: 'User is already a collaborator' });
+            res.status(400).json({ error: 'User is already a collaborator' });
+            return;
         }
 
         const collaborator = await ProjectCollaborator.create({
@@ -276,18 +294,21 @@ export async function removeCollaborator(req: Request, res: Response) {
         const userId = (req as any).user?.userId;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
         }
 
         const project = await Project.findById(id);
 
         if (!project) {
-            return res.status(404).json({ error: 'Project not found' });
+            res.status(404).json({ error: 'Project not found' });
+            return;
         }
 
         // Check if user is owner
         if (project.ownerId.toString() !== userId) {
-            return res.status(403).json({ error: 'Only owner can remove collaborators' });
+            res.status(403).json({ error: 'Only owner can remove collaborators' });
+            return;
         }
 
         await ProjectCollaborator.deleteOne({
@@ -299,5 +320,106 @@ export async function removeCollaborator(req: Request, res: Response) {
     } catch (error) {
         console.error('Remove collaborator error:', error);
         res.status(500).json({ error: 'Failed to remove collaborator' });
+    }
+}
+
+export async function joinProjectByCode(req: Request, res: Response) {
+    try {
+        const { inviteCode } = req.body;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        if (!inviteCode) {
+            res.status(400).json({ error: 'Invite code is required' });
+            return;
+        }
+
+        // Find project by invite code
+        const project = await Project.findOne({ inviteCode: inviteCode.toUpperCase().replace(/\s/g, '') });
+
+        if (!project) {
+            res.status(404).json({ error: 'Invalid invite code' });
+            return;
+        }
+
+        // Check if user is already owner
+        console.log('Owner check:', {
+            projectOwnerId: project.ownerId.toString(),
+            userId: userId,
+            areEqual: project.ownerId.toString() === userId
+        });
+
+        if (project.ownerId.toString() === userId) {
+            res.status(400).json({ error: 'You are the owner of this project' });
+            return;
+        }
+
+        // Check if already a collaborator
+        const existing = await ProjectCollaborator.findOne({
+            projectId: project._id,
+            userId: userId,
+        });
+
+        if (existing) {
+            res.status(400).json({ error: 'You are already a collaborator on this project' });
+            return;
+        }
+
+        // Add user as collaborator with editor role
+        await ProjectCollaborator.create({
+            projectId: project._id,
+            userId: userId,
+            role: 'editor',
+        });
+
+        res.status(200).json({
+            message: 'Successfully joined project',
+            project: {
+                id: project._id,
+                name: project.name,
+                description: project.description,
+            },
+        });
+    } catch (error) {
+        console.error('Join project by code error:', error);
+        res.status(500).json({ error: 'Failed to join project' });
+    }
+}
+
+export async function regenerateInviteCode(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const project = await Project.findById(id);
+
+        if (!project) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+
+        // Check if user is owner
+        if (project.ownerId.toString() !== userId) {
+            res.status(403).json({ error: 'Only owner can regenerate invite code' });
+            return;
+        }
+
+        // Generate new invite code
+        project.inviteCode = generateInviteCode();
+        await project.save();
+
+        res.json({ inviteCode: project.inviteCode });
+    } catch (error) {
+        console.error('Regenerate invite code error:', error);
+        res.status(500).json({ error: 'Failed to regenerate invite code' });
     }
 }
