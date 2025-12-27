@@ -1,0 +1,114 @@
+// Prisma Schema for CodeCollab Platform
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  avatar    String?
+  githubId  String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  ownedProjects    Project[] @relation("ProjectOwner")
+  collaborations   ProjectCollaborator[]
+  
+  @@index([githubId])
+  @@index([email])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  template    String   @default("nodejs-express") // nodejs-express, python-flask, etc.
+  runtime     String   @default("node:20")
+  
+  ownerId     String
+  owner       User     @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  files         ProjectFile[]
+  collaborators ProjectCollaborator[]
+  
+  @@index([ownerId])
+}
+
+model ProjectCollaborator {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  role      String   @default("editor") // owner, editor, viewer
+  
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+}
+
+model ProjectFile {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  path      String   // File path within project (e.g., "src/index.ts")
+  content   String   @default("") @db.Text
+  language  String?  // javascript, typescript, python, etc.
+  
+  lockedBy  String?
+  lockedAt  DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([projectId, path])
+  @@index([projectId])
+  @@index([lockedBy])
+}
+
+model FileLock {
+  id         String   @id @default(cuid())
+  fileId     String
+  userId     String
+  projectId  String
+  filePath   String
+  
+  acquiredAt DateTime @default(now())
+  expiresAt  DateTime
+  
+  @@index([fileId])
+  @@index([userId])
+  @@index([projectId, filePath])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String   // file:edit, file:lock, user:add, project:create
+  resourceId String
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  
+  createdAt  DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

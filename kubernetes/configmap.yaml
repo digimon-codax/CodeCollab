@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codecollab-config
+  namespace: codecollab
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  CORS_ORIGIN: "https://codecollab.example.com"
+  REDIS_URL: "redis://codecollab-redis:6379"
