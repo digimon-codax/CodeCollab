@@ -23,6 +23,24 @@ export function useFileLock(projectId: string, filePath: string) {
     useEffect(() => {
         if (!socket || !isConnected) return;
 
+        // Request initial lock status
+        socket.emit('file:getLockStatus', { projectId, filePath });
+
+        // Listen for lock status response
+        socket.on('lock:status', (data: any) => {
+            if (data.filePath === filePath) {
+                setLockInfo({
+                    locked: data.locked,
+                    holder: data.locked ? {
+                        id: data.userId,
+                        name: data.userName,
+                    } : null,
+                    expiresAt: data.expiresAt,
+                    isOwnedByCurrentUser: data.locked && data.userId === getCurrentUserId(),
+                });
+            }
+        });
+
         // Listen for lock events
         socket.on('lock:acquired', (data: any) => {
             if (data.filePath === filePath) {
@@ -64,11 +82,12 @@ export function useFileLock(projectId: string, filePath: string) {
         });
 
         return () => {
+            socket.off('lock:status');
             socket.off('lock:acquired');
             socket.off('lock:released');
             socket.off('lock:failed');
         };
-    }, [socket, isConnected, filePath]);
+    }, [socket, isConnected, filePath, projectId]);
 
     const acquireLock = () => {
         if (socket && projectId && filePath) {

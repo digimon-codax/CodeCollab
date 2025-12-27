@@ -85,6 +85,51 @@ export async function createFile(req: Request, res: Response) {
     }
 }
 
+export async function createFolder(req: Request, res: Response) {
+    try {
+        const { projectId } = req.params;
+        const { path } = req.body;
+        const userId = (req as any).user?.userId;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const hasAccess = await ProjectCollaborator.findOne({ projectId, userId });
+
+        if (!hasAccess || hasAccess.role === 'viewer') {
+            res.status(403).json({ error: 'Access denied' });
+            return;
+        }
+
+        // Create a placeholder file to represent the folder
+        const folderMarkerPath = `${path}/.gitkeep`;
+        const existing = await ProjectFile.findOne({ projectId, path: folderMarkerPath });
+
+        if (existing) {
+            res.status(400).json({ error: 'Folder already exists' });
+            return;
+        }
+
+        const file = await ProjectFile.create({
+            projectId,
+            path: folderMarkerPath,
+            content: '',
+            language: 'plaintext',
+        });
+
+        res.status(201).json({
+            id: file._id,
+            path: path,
+            message: 'Folder created successfully',
+        });
+    } catch (error) {
+        console.error('Create folder error:', error);
+        res.status(500).json({ error: 'Failed to create folder' });
+    }
+}
+
 export async function updateFile(req: Request, res: Response) {
     try {
         const { projectId, path } = req.params;

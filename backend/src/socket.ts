@@ -204,6 +204,37 @@ export function setupSocketEvents(io: Server) {
             }
         });
 
+        // Get lock status for a file
+        socket.on('file:getLockStatus', async (data: {
+            projectId: string;
+            filePath: string;
+        }) => {
+            try {
+                const { projectId, filePath } = data;
+                const lock = await lockManager.getLock(projectId, filePath);
+
+                if (lock) {
+                    socket.emit('lock:status', {
+                        filePath,
+                        locked: true,
+                        userId: lock.holder,
+                        userName: lock.holderName,
+                        expiresAt: lock.expiresAt,
+                    });
+                } else {
+                    socket.emit('lock:status', {
+                        filePath,
+                        locked: false,
+                        userId: null,
+                        userName: null,
+                        expiresAt: null,
+                    });
+                }
+            } catch (error) {
+                console.error('Get lock status error:', error);
+            }
+        });
+
         // Presence updates
         socket.on('presence:update', async (data: {
             fileName: string;

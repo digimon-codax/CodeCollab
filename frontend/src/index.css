@@ -22,7 +22,7 @@ body {
   overflow: hidden;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - VS Code style */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -33,17 +33,21 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3E3E42;
-  border-radius: 5px;
+  background: #424242;
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4E4E52;
+  background: #4E4E4E;
 }
 
 /* Monaco Editor adjustments */
 .monaco-editor {
   font-family: 'Fira Code', Monaco, 'Courier New', monospace !important;
+}
+
+.monaco-editor .margin {
+  background-color: #1E1E1E !important;
 }
 
 /* Remote cursor styles */
@@ -75,7 +79,7 @@ body {
 }
 
 .file-tree-item:hover {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: #2A2A2A;
 }
 
 /* Typing indicator animation */
@@ -107,11 +111,11 @@ body {
 
 /* Tab styles */
 .tab-active {
-  @apply bg-dark-elevated border-b-2 border-blue-500;
+  @apply bg-[#1E1E1E] border-b-2 border-blue-500;
 }
 
 .tab-inactive {
-  @apply bg-dark-surface border-b border-dark-border hover:bg-dark-elevated;
+  @apply bg-[#2D2D2D] border-b border-[#1E1E1E] hover:bg-[#2A2A2A];
 }
 
 /* Lock indicator pulse */
@@ -122,4 +126,26 @@ body {
 
 .lock-indicator {
   animation: lock-pulse 2s infinite;
+}
+
+/* VS Code Colors */
+:root {
+  --vscode-bg: #1E1E1E;
+  --vscode-elevated: #252526;
+  --vscode-surface: #2D2D2D;
+  --vscode-border: #1E1E1E;
+  --vscode-activity-bar: #333333;
+  --vscode-status-bar: #007ACC;
+  --vscode-hover: #2A2A2A;
+}
+
+/* Smooth transitions */
+* {
+  transition-property: background-color, border-color, color;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+
+button, a, input, select {
+  transition-property: all;
 }

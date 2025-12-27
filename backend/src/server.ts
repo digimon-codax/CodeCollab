@@ -101,6 +101,7 @@ app.post('/api/projects/:id/invite-code/regenerate', authMiddleware, projectsCon
 // File routes
 app.get('/api/projects/:projectId/files/:path(*)', authMiddleware, filesController.getFile);
 app.post('/api/projects/:projectId/files', authMiddleware, filesController.createFile);
+app.post('/api/projects/:projectId/folders', authMiddleware, filesController.createFolder);
 app.put('/api/projects/:projectId/files/:path(*)', authMiddleware, filesController.updateFile);
 app.delete('/api/projects/:projectId/files/:path(*)', authMiddleware, filesController.deleteFile);
 

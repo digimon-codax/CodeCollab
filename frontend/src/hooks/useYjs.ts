@@ -23,9 +23,12 @@ export function useYjs(projectId: string, filePath: string): UseYjsReturn {
 
         const roomName = `${projectId}:${filePath}`;
 
+        // Get WebSocket URL from environment or use default
+        const wsUrl = import.meta.env?.VITE_WS_URL || 'ws://localhost:3000';
+
         // Connect to WebSocket provider
         const provider = new WebsocketProvider(
-            'ws://localhost:3000',
+            wsUrl,
             roomName,
             doc,
             {

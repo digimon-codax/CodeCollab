@@ -18,7 +18,8 @@ export function useSocket(): UseSocketReturn {
             return;
         }
 
-        const newSocket = io('http://localhost:3000', {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const newSocket = io(apiUrl, {
             auth: { token },
             transports: ['websocket', 'polling'],
         });
@@ -37,7 +38,7 @@ export function useSocket(): UseSocketReturn {
             console.error('Socket error:', error);
         });
 
-        newSocket.on('connect_error', (error) => {
+        newSocket.on('connect_error', (error: Error) => {
             console.error('Connection error:', error.message);
         });
 

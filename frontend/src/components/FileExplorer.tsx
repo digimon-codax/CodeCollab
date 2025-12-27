@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { File, Folder, ChevronRight, ChevronDown } from 'lucide-react';
+import { File, Folder, ChevronRight, ChevronDown, Lock } from 'lucide-react';
 import { useEditorStore } from '../stores/editorStore';
+import FileOperations from './FileOperations';
 
 interface FileItem {
     id: string;
@@ -11,10 +12,11 @@ interface FileItem {
 interface FileExplorerProps {
     projectId: string;
     files: FileItem[];
+    onRefresh?: () => void;
 }
 
-export default function FileExplorer({ projectId, files }: FileExplorerProps) {
-    const { activeFile, setActiveFile } = useEditorStore();
+export default function FileExplorer({ projectId, files, onRefresh }: FileExplorerProps) {
+    const { activeFile, setActiveFile, addTab } = useEditorStore();
     const [expanded, setExpanded] = useState<Set<string>>(new Set(['/']));
 
     const toggleDirectory = (dir: string) => {
@@ -25,6 +27,34 @@ export default function FileExplorer({ projectId, files }: FileExplorerProps) {
             newExpanded.add(dir);
         }
         setExpanded(newExpanded);
+    };
+
+    const handleFileClick = (file: FileItem) => {
+        setActiveFile(file.path);
+        addTab({
+            path: file.path,
+            language: file.language,
+            isLocked: false,
+        });
+    };
+
+    const getFileIcon = (path: string) => {
+        const ext = path.split('.').pop()?.toLowerCase();
+        const colors: Record<string, string> = {
+            js: 'text-yellow-400',
+            jsx: 'text-blue-400',
+            ts: 'text-blue-500',
+            tsx: 'text-blue-500',
+            py: 'text-blue-300',
+            java: 'text-red-400',
+            go: 'text-cyan-400',
+            rs: 'text-orange-400',
+            css: 'text-blue-400',
+            html: 'text-orange-500',
+            json: 'text-yellow-500',
+            md: 'text-gray-400',
+        };
+        return colors[ext || ''] || 'text-gray-400';
     };
 
     // Build file tree structure
@@ -38,7 +68,7 @@ export default function FileExplorer({ projectId, files }: FileExplorerProps) {
                     <div key={item.path}>
                         <div
                             onClick={() => toggleDirectory(item.path)}
-                            className="file-tree-item flex items-center gap-2 px-3 py-1.5 cursor-pointer text-sm"
+                            className="file-tree-item flex items-center gap-2 px-3 py-1.5 cursor-pointer text-sm hover:bg-[#2A2A2A]"
                             style={{ paddingLeft: `${depth * 12 + 12}px` }}
                         >
                             {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -55,13 +85,15 @@ export default function FileExplorer({ projectId, files }: FileExplorerProps) {
                 return (
                     <div
                         key={item.path}
-                        onClick={() => setActiveFile(item.path)}
-                        className={`file-tree-item flex items-center gap-2 px-3 py-1.5 cursor-pointer text-sm ${isActive ? 'bg-blue-600/20 text-blue-400' : ''
-                            }`}
+                        onClick={() => handleFileClick(item)}
+                        className={`file-tree-item flex items-center gap-2 px-3 py-1.5 cursor-pointer text-sm hover:bg-[#2A2A2A] ${
+                            isActive ? 'bg-[#37373D] text-white' : 'text-gray-300'
+                        }`}
                         style={{ paddingLeft: `${depth * 12 + 28}px` }}
                     >
-                        <File size={16} />
-                        <span>{item.name}</span>
+                        <File size={16} className={getFileIcon(item.path)} />
+                        <span className="flex-1">{item.name}</span>
+                        {item.isLocked && <Lock size={12} className="text-yellow-500" />}
                     </div>
                 );
             }
@@ -69,10 +101,16 @@ export default function FileExplorer({ projectId, files }: FileExplorerProps) {
     }
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="px-4 py-3 border-b border-dark-border">
-                <h3 className="font-semibold text-sm">FILES</h3>
+        <div className="h-full flex flex-col bg-[#252526]">
+            <div className="px-4 py-3 border-b border-[#1E1E1E]">
+                <h3 className="font-semibold text-sm text-gray-300 uppercase tracking-wider">Explorer</h3>
             </div>
+
+            <FileOperations 
+                projectId={projectId} 
+                currentFile={activeFile || undefined}
+                onFileCreated={onRefresh}
+            />
 
             <div className="flex-1 overflow-y-auto">
                 {files.length === 0 ? (
