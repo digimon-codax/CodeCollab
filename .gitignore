@@ -38,7 +38,7 @@ coverage/
 .nyc_output/
 
 # Docker
-*.dockerignore
+# Don't ignore .dockerignore!
 
 # Temporary files
 *.tmp

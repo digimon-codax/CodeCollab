@@ -13,15 +13,25 @@ EXPOSE 5173
 CMD ["npm", "run", "dev"]
 
 # Build stage
-FROM node:20 AS build
+FROM node:20-alpine AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm install
-
+# Copy EVERYTHING first to detect context (monorepo or subfolder)
 COPY . .
-RUN npm run build
+
+# SMART CONTEXT DISCOVERY: 
+# If we find a 'frontend' folder, we are in the root context. 
+# We move everything from frontend/ to current dir.
+RUN if [ -d "frontend" ]; then \
+    echo ">>> AUTO-DETECTED: Root context. Moving files from frontend/ to /app"; \
+    cp -rp frontend/* ./ && rm -rf frontend; \
+    else \
+    echo ">>> AUTO-DETECTED: Subdirectory context."; \
+    fi
+
+# Build production files
+RUN npm install && npm run build
 
 # Production stage 
 FROM nginx:alpine AS production

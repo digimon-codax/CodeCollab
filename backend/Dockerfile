@@ -1,22 +1,32 @@
-# Using standard node image for better native build support
-FROM node:20 AS base
+FROM node:20-alpine AS base
 
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y python3 git make g++ gcc && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache python3 git make g++ gcc
 
-# Copy package files explicitly
-COPY package.json package-lock.json* ./
-
-# Debug: list files to ensure they were copied
-RUN ls -la
-
-# Install dependencies
-RUN npm install
-
-# Copy source code
+# Copy EVERYTHING first to detect context (monorepo or subfolder)
 COPY . .
+
+# SMART CONTEXT DISCOVERY: 
+# If we find a 'backend' folder, we are in the root context. 
+# We move everything from backend/ to the current dir.
+RUN if [ -d "backend" ]; then \
+  echo ">>> AUTO-DETECTED: Root context. Moving files from backend/ to /app"; \
+  cp -rp backend/* ./ && rm -rf backend; \
+  else \
+  echo ">>> AUTO-DETECTED: Subdirectory context."; \
+  fi
+
+# Final check for package.json
+RUN if [ ! -f "package.json" ]; then \
+  echo "FATAL ERROR: package.json not found!"; \
+  ls -la; \
+  exit 1; \
+  fi
+
+# Clean install
+RUN npm install
 
 # Build TypeScript
 RUN npm run build
@@ -25,14 +35,14 @@ RUN npm run build
 RUN npm prune --production
 
 # Production stage
-FROM node:20-slim AS production
+FROM node:20-alpine AS production
 
 WORKDIR /app
 
 # Copy dependencies and built files
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/dist ./dist
-COPY --from=base /app/package.json /app/package-lock.json* ./
+COPY --from=base /app/package*.json ./
 
 # Expose port
 EXPOSE 3000
