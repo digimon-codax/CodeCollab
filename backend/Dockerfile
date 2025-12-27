@@ -1,12 +1,16 @@
-FROM node:20-alpine AS base
+# Using standard node image for better native build support
+FROM node:20 AS base
 
 WORKDIR /app
 
 # Install system dependencies
-RUN apk add --no-cache python3 git make g++ gcc
+RUN apt-get update && apt-get install -y python3 git make g++ gcc && rm -rf /var/lib/apt/lists/*
 
-# Copy package files
-COPY package*.json ./
+# Copy package files explicitly
+COPY package.json package-lock.json* ./
+
+# Debug: list files to ensure they were copied
+RUN ls -la
 
 # Install dependencies
 RUN npm install
@@ -21,14 +25,14 @@ RUN npm run build
 RUN npm prune --production
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:20-slim AS production
 
 WORKDIR /app
 
 # Copy dependencies and built files
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/dist ./dist
-COPY --from=base /app/package*.json ./
+COPY --from=base /app/package.json /app/package-lock.json* ./
 
 # Expose port
 EXPOSE 3000
