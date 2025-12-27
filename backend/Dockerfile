@@ -9,8 +9,7 @@ RUN apk add --no-cache python3 git make g++ gcc
 COPY package*.json ./
 
 # Install dependencies
-# Install dependencies
-RUN npm ci
+RUN npm install
 
 # Copy source code
 COPY . .
