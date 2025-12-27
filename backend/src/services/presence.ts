@@ -1,7 +1,4 @@
-import Redis from 'ioredis';
-import { config } from '../config/env';
-
-const redis = new Redis(config.redis.url);
+import { redis } from './redis';
 
 export interface UserPresence {
     userId: string;

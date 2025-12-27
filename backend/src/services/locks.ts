@@ -1,7 +1,4 @@
-import Redis from 'ioredis';
-import { config } from '../config/env';
-
-const redis = new Redis(config.redis.url);
+import { redis } from './redis';
 const LOCK_DURATION = 10 * 60 * 1000; // 10 minutes in milliseconds
 
 export interface FileLock {
